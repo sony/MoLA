@@ -33,14 +33,6 @@ bash prepare/prepare_clip.sh
 bash prepare/download_t2m_evaluators.sh
 ```
 
-#### Pre-trained model
-
-Run the script to download the pre-train models:
-
-
-```shell
-bash prepare/download_pretrained_models.sh
-```
 
 #### Dataset
 Please refer to [HumanML3D](https://github.com/EricGuo5513/HumanML3D) for text-to-motion dataset setup. Copy the result dataset to our repository:
@@ -117,9 +109,3 @@ We would like to thank the authors of these repos for their excellent work:
 [MPGD](https://github.com/KellyYutongHe/mpgd_pytorch/),
 [SAN](https://github.com/sony/san),
 [T2M-GPT](https://github.com/Mael-zys/T2M-GPT).
-
-
-## License
-This code is distributed under a [MIT LICENSE](LICENSE).
-
-Note that our code depends on other libraries, including SMPL, SMPL-X, and uses datasets which each have their own respective licenses that must also be followed.
