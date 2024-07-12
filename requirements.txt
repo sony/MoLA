@@ -1,0 +1,14 @@
+torch
+pytorch_lightning 
+torchmetrics==0.7
+omegaconf
+shortuuid
+tqdm
+pandas
+chumpy
+transformers
+psutil
+einops
+yacs
+wandb
+rich
