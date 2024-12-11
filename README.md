@@ -8,7 +8,7 @@ This repository is the official implementation of "MoLA: Motion Generation and E
   <img src='https://img.shields.io/badge/Paper-PDF-magenta?style=flat&logo=arXiv&logoColor=magenta'></a> 
   <a href='https://arxiv.org/abs/2406.01867'>
   <img src='https://img.shields.io/badge/Arxiv-2406.01867-A42C25?style=flat&logo=arXiv&logoColor=A42C25'></a> 
-  <a href='https://k5uchida.github.io/MoLA-demo/'>
+  <a href='https://kengouchida-sony.github.io/MoLA-demo/'>
   <img src='https://img.shields.io/badge/Project-Page-yellow?style=flat&logo=Google%20chrome&logoColor=yellow'></a> 
 </p>
 
