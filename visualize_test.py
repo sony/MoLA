@@ -1,136 +1,107 @@
-
 import os
-import time
-
-from pathlib import Path
-
-import numpy as np
+import clip
 import torch
+import numpy as np
+import models.vaesan as vaesan
+import models.t2m_latent_diffusion as latent_diffusion
 
-from mola.config import parse_args
-from mola.data.get_data import get_datasets
-from mola.models.get_model import get_model
-from mola.utils.logger import create_logger
+from utils.motion_process import recover_from_ric
+import visualization.plot_3d_global as plot_3d
+import options.option_diffusion as option_diffusion
 
-
-def main():
-    """
-    tasks:
-         1. standard text-to-motion generation
-         2. motion editing with guided generation
-    """
-    # parse options
-    cfg = parse_args(phase="demo")
-    cfg.FOLDER = cfg.TEST.FOLDER
-    cfg.Name = "demo--" + cfg.NAME
-    logger = create_logger(cfg, phase="demo")
+args = option_diffusion.get_args_parser()
+device = torch.device('cuda')
 
 
-    from mola.utils.demo_utils import load_example_input
-    text, length = load_example_input(cfg.DEMO.EXAMPLE)
+
+## load clip model and datasets
+clip_model, clip_preprocess = clip.load("ViT-B/32", device=torch.device(device), jit=False, download_root='./')  # Must set jit=False for training
+clip.model.convert_weights(clip_model)  # Actually this line is unnecessary since clip by default already on float16
+clip_model.eval()
+for p in clip_model.parameters():
+    p.requires_grad = False
+
+net = vaesan.HumanVAESAN(args, ## use args to define different parameters in different quantizers
+                       args.latent_dim,
+                       args.output_emb_width,
+                       args.down_t,
+                       args.stride_t,
+                       args.width,
+                       args.depth,
+                       args.dilation_growth_rate)
 
 
-    output_dir = Path(
-        os.path.join(cfg.FOLDER, str(cfg.model.model_type), str(cfg.NAME),
-                     "samples_" + cfg.TIME))
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # cuda options
-    if cfg.ACCELERATOR == "gpu":
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(
-            str(x) for x in cfg.DEVICE)
-        device = torch.device("cuda")
-
-    # load dataset to extract nfeats dim of model
-    dataset = get_datasets(cfg, logger=logger, phase="test")[0]
-
-    # create MoLA model
-    total_time = time.time()
-    model = get_model(cfg, dataset)
-
-
-    # loading checkpoints
-    logger.info("Loading checkpoints from {}".format(cfg.TEST.CHECKPOINTS))
-    state_dict = torch.load(cfg.TEST.CHECKPOINTS,
-                            map_location="cpu")["state_dict"]
-
-
-    model.load_state_dict(state_dict, strict=True)
-    logger.info("model {} loaded".format(cfg.model.model_type))
-    model.sample_mean = cfg.TEST.MEAN
-    model.fact = cfg.TEST.FACT
-    model.to(device)
-    model.eval()
-
-    # sample
-    with torch.no_grad():
-
-        # task: input or Example
-        if text:
-            # prepare batch data
-            batch = {"length": length, "text": text}
-            
-            for rep in range(cfg.DEMO.REPLICATION):
-                # motion editing
-                if cfg.DEMO.EDITING:
-                    #prep. for control signal
-                    control_joints= torch.Tensor(np.load(cfg.DEMO.CONTROL)).unsqueeze(0)
-                    control = control_joints.cuda()
-                    joints = model.edit_with_mpgd(batch, control)
-                    
-                # text-to-motion generation
-                else:
-                    joints = model(batch)
-
-                nsample = len(joints)
-                id = 0
-                for i in range(nsample):
-                    npypath = str(output_dir /
-                                f"len{length[i]}_batch{id}_{i}.npy")
-                    with open(npypath.replace(".npy", ".txt"), "w") as text_file:
-                        text_file.write(batch["text"][i])
-                    
-                    if cfg.DEMO.EDITING:
-                        control_path = os.path.splitext(npypath)[0] + '_control' + os.path.splitext(npypath)[1]
-                        control_gen_path = os.path.splitext(npypath)[0] + '_' + cfg.DEMO.EDIT_TYPE + os.path.splitext(npypath)[1]
-                        np.save(control_path, control[i].detach().cpu().numpy())
-                        np.save(control_gen_path, joints[i].detach().cpu().numpy())
-                    
-                    np.save(npypath, joints[i].detach().cpu().numpy())
-                    logger.info(f"Motions are generated here:\n{npypath}")
-
-        total_time = time.time() - total_time
-        print(
-            f'Total time spent: {total_time:.2f} seconds (including model loading time and exporting time).'
+stage2_model = latent_diffusion.Text2Motion_LatentDiffusion(args,
+        io_channels=args.latent_dim,
+        patch_size=1,
+        embed_dim=args.clip_dim,
+        cond_token_dim=0,
+        project_cond_tokens=False,
+        global_cond_dim=512,
+        project_global_cond=False,
+        input_concat_dim=0,
+        prepend_cond_dim=0,
+        depth=9,
+        num_heads=4
         )
-        
-    if cfg.DEMO.VISUALIZE:
-        # plot bone with lines
-        from mola.data.humanml.utils.plot_script import plot_3d_motion, plot_3d_condition
-        for i in range(len(text)):
-            
-            j_data = joints[i].to('cpu').detach().numpy().copy()
 
-            if cfg.DEMO.EDITING:
 
-                control_data = control[i].to('cpu').detach().numpy().copy()
-                fig_control_path = Path(str(control_path).replace(".npy",".gif"))
-                if cfg.DEMO.EDIT_TYPE == 'inbetweening':
-                    control_txt = 'start-end control'
-                elif cfg.DEMO.EDIT_TYPE == 'upper':
-                    control_txt = 'lower-body control'
-                elif cfg.DEMO.EDIT_TYPE == 'path':
-                    control_txt = 'path control'
-                plot_3d_condition(fig_control_path, control_data, j_data, title=control_txt, fps=cfg.DEMO.FRAME_RATE, edit_type=cfg.DEMO.EDIT_TYPE, plot_type='control_only')
-                fig_control_gen_path = Path(str(control_gen_path).replace(".npy",".gif"))
-                plot_3d_condition(fig_control_gen_path, control_data, j_data, title=text[i], fps=cfg.DEMO.FRAME_RATE, edit_type=cfg.DEMO.EDIT_TYPE, plot_type='control_gen')
-            
-            else:
-                npypath = str(output_dir /
-                        f"len{length[i]}_batch{id}_{i}_{rep}.npy")
-                fig_path = Path(str(npypath).replace(".npy",".gif"))
-                plot_3d_motion(fig_path, j_data, title=text[i], fps=cfg.DEMO.FRAME_RATE)
-            
+print ('loading checkpoint from {}'.format(args.resume_vae))
+ckpt = torch.load(args.resume_vae, map_location='cpu')
+net.load_state_dict(ckpt['net'], strict=True)
+net.eval()
+net.cuda(device)
 
-if __name__ == "__main__":
-    main()
+print ('loading transformer checkpoint from {}'.format(args.resume_dit))
+ckpt = torch.load(args.resume_dit, map_location='cpu')
+stage2_model.load_state_dict(ckpt['trans'], strict=True)
+stage2_model.eval()
+stage2_model.cuda(device)
+
+
+mean = torch.from_numpy(np.load('./checkpoints/t2m/Comp_v6_KLD005/meta/mean.npy')).cuda()
+std = torch.from_numpy(np.load('./checkpoints/t2m/Comp_v6_KLD005/meta/std.npy')).cuda()
+
+#visualization
+clip_text = [args.prompt]
+#clip_text = ["A person walks to with their hands up."]
+
+text = clip.tokenize(clip_text, truncate=True).cuda(device)
+feat_clip_text = clip_model.encode_text(text).float()
+
+if args.edit_mode == 'path':
+    print("EDIT:" + args.edit_mode)
+    control_joints= torch.Tensor(np.load("./demo/control_example_path_zigzag.npy")).unsqueeze(0)
+    control = control_joints.cuda()
+elif args.edit_mode == 'inbetweening':
+    print("EDIT:" + args.edit_mode)
+    control_joints= torch.Tensor(np.load("./demo/control_example_start_end_left.npy")).unsqueeze(0)
+    control = control_joints.cuda()
+elif args.edit_mode == 'upper_edit':
+    print("EDIT:" + args.edit_mode)
+    control_joints= torch.Tensor(np.load("./demo/control_example_lowerbody_circle.npy")).unsqueeze(0)
+    control = control_joints.cuda()
+
+
+
+if args.edit_mode is not None:
+    edit_scale = args.edit_scale
+    z = stage2_model._diffusion_reverse(feat_clip_text, lengths=control.shape[1], control=control.detach(), stage1_model=net, edit_scale=edit_scale)
+else:
+    z = stage2_model._diffusion_reverse(feat_clip_text, lengths=None) 
+
+
+pred_pose = net.forward_decoder_clip(z)
+
+
+pred_xyz = recover_from_ric((pred_pose*std+mean).float(), 22) #if kit:21, else humanml3d:22
+xyz = pred_xyz.reshape(1, -1, 22, 3) #if kit:21, else humanml3d:22
+
+
+
+if args.edit_mode is not None:
+    np.save(os.path.join('./output', 'visualize_test_'+ args.edit_mode + '.npy'), xyz.detach().squeeze(0).cpu().numpy())
+    pose_vis = plot_3d.draw_to_batch(xyz.detach().cpu().numpy(), clip_text, ['output/visualize_test_'+ args.edit_mode + '.gif'], control.squeeze(0).cpu().numpy(), args.edit_mode, 'control_gen')
+else:
+    np.save(os.path.join('./output', 'visualize_test.npy'), xyz.detach().squeeze(0).cpu().numpy())
+    pose_vis = plot_3d.draw_to_batch(xyz.detach().cpu().numpy(), clip_text, ['output/visualize_test.gif'])
