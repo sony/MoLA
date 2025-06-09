@@ -212,26 +212,14 @@ def evaluation_stage2(out_dir, val_loader, net, trans, logger, nb_iter, best_fid
             pred_pose_eval = torch.zeros((bs, seq, pose.shape[-1])).cuda()
             pred_len = torch.ones(bs).long()
 
+            z_motion = trans._diffusion_reverse(feat_clip_text, lengths=None)
+            pred_pose = net.forward_decoder(z_motion)
             for k in range(bs):
-                starttime = time.time()
-                z_motion = trans._diffusion_reverse(feat_clip_text[k:k+1], lengths=None)
-                
-                pred_pose = net.forward_decoder_clip(z_motion)
-                cur_len = pred_pose.shape[1]
-                
+                pred_clip = net.pose_clip(pred_pose[k:k+1]) 
+                cur_len = pred_clip.shape[1]
                 pred_len[k] = min(cur_len, seq)
-                pred_pose_eval[k:k+1, :cur_len] = pred_pose[:, :seq]
+                pred_pose_eval[k:k+1, :cur_len] = pred_clip[:, :seq]
 
-                if draw:
-                    pred_denorm = val_loader.dataset.inv_transform(pred_pose.detach().cpu().numpy())
-                    pred_xyz = recover_from_ric(torch.from_numpy(pred_denorm).float().cuda(), num_joints)
-
-                    if i == 0 and k < 4:
-                        draw_pred.append(pred_xyz)
-                        draw_text_pred.append(clip_text[k])
-                endtime = time.time()
-                elapsed = endtime - starttime
-                times.append(elapsed)
 
             et_pred, em_pred = eval_wrapper.get_co_embeddings(word_embeddings, pos_one_hots, sent_len, pred_pose_eval, pred_len)
             
@@ -361,33 +349,27 @@ def evaluation_stage2_test(out_dir, val_loader, net, trans, logger, nb_iter, bes
         for i in range(30):
             pred_pose_eval = torch.zeros((bs, seq, pose.shape[-1])).cuda()
             pred_len = torch.ones(bs).long()
-            starttime = time.time()
-            times = []
+            z_motion = trans._diffusion_reverse(feat_clip_text, lengths=None)
+
+            pred_pose = net.forward_decoder(z_motion)
             for k in range(bs):
-                z_motion = trans._diffusion_reverse(feat_clip_text[k:k+1], lengths=None)
-                
-                pred_pose = net.forward_decoder_clip(z_motion)
-                cur_len = pred_pose.shape[1]
-
+                pred_clip = net.pose_clip(pred_pose[k:k+1]) 
+                cur_len = pred_clip.shape[1]
                 pred_len[k] = min(cur_len, seq)
-                pred_pose_eval[k:k+1, :cur_len] = pred_pose[:, :seq]
+                pred_pose_eval[k:k+1, :cur_len] = pred_clip[:, :seq]
 
-                if i == 0 and (draw or savenpy):
-                    pred_denorm = val_loader.dataset.inv_transform(pred_pose.detach().cpu().numpy())
-                    pred_xyz = recover_from_ric(torch.from_numpy(pred_denorm).float().cuda(), num_joints)
+            #     if i == 0 and (draw or savenpy):
+            #         pred_denorm = val_loader.dataset.inv_transform(pred_clip.detach().cpu().numpy())
+            #         pred_xyz = recover_from_ric(torch.from_numpy(pred_denorm).float().cuda(), num_joints)
 
-                    if savenpy:
-                        np.save(os.path.join(out_dir, name[k]+'_pred.npy'), pred_xyz.detach().cpu().numpy())
+            #         if savenpy:
+            #             np.save(os.path.join(out_dir, name[k]+'_pred.npy'), pred_xyz.detach().cpu().numpy())
 
-                    if draw:
-                        if i == 0:
-                            draw_pred.append(pred_xyz)
-                            draw_text_pred.append(clip_text[k])
-                            draw_name.append(name[k])
-            endtime = time.time()
-            elapsed = endtime - starttime
-            times.append(elapsed)
-            print(f"Average time per sample ({bs*len(times)}): ", np.mean(times)/bs)
+            #         if draw:
+            #             if i == 0:
+            #                 draw_pred.append(pred_xyz)
+            #                 draw_text_pred.append(clip_text[k])
+            #                 draw_name.append(name[k])
             
 
             et_pred, em_pred = eval_wrapper.get_co_embeddings(word_embeddings, pos_one_hots, sent_len, pred_pose_eval, pred_len)

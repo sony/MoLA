@@ -183,28 +183,23 @@ class VAE(nn.Module):
 
         return x_out
     
-    def forward_decoder_clip(self, z, length=None):
-        assert z.shape[0] == 1
-
-        # decoder
-        x_decoder = self.decoder(z)
-        x_pose = self.postprocess(x_decoder)
-
+    def pose_clip(self, pose, length=None):
+        
         # activation in [0, 1]
         sigmoid = nn.Sigmoid()
-        x_pose[...,  -1] = sigmoid(x_pose[..., -1])
+        pose[...,  -1] = sigmoid(pose[..., -1])
 
-        flag = torch.abs(x_pose[0,:,-1]) > 0.999
+        flag = torch.abs(pose[0,:,-1]) > 0.999
         false_indices = torch.nonzero(flag == False)
         flag_idx = false_indices[0] if len(false_indices) > 0 else len(flag) - 1
       
         flag_idx = max(flag_idx, 10)
 
         if length is None:
-            x_out = x_pose[:,:flag_idx,:-1]
+            x_out = pose[:,:flag_idx,:-1]
         else:
             # TODO
-            x_out = x_pose[:,:length,:-1]
+            x_out = pose[:,:length,:-1]
 
         return x_out
 
@@ -248,8 +243,8 @@ class HumanVAESAN(nn.Module):
         x_out = self.vae.forward_decoder(x)
         return x_out
     
-    def forward_decoder_clip(self, x, length=None):
-        x_out = self.vae.forward_decoder_clip(x, length=length)
+    def pose_clip(self, x, length=None):
+        x_out = self.vae.pose_clip(x, length=length)
         return x_out
 
     def adversarial(self, x, target, flg_train=False):

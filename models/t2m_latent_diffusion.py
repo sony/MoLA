@@ -206,7 +206,7 @@ class Text2Motion_LatentDiffusion(nn.Module):
         for i, t in enumerate(timesteps):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = latents
-            ts = t.unsqueeze(0)
+            ts = t.unsqueeze(0).repeat(bsz)
 
             global_embed = encoder_hidden_states
             
