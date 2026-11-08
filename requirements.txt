@@ -8,5 +8,5 @@ natten==0.17.4
 numpy==1.19.2
 packaging==20.4
 scipy==1.5.2
-torch==1.8.0a0+17f8c32
+torch==2.13.0
 tqdm==4.31.1
